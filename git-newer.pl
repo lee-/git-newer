@@ -26,30 +26,83 @@
 use strict;
 use warnings;
 use autodie;
+
 use MIME::Lite;
+use Getopt::Long;
 
 
-unless(@ARGV == 3) {
-  print "usage: git-newer.pl [path-to-repo] [email-recipient] [email-from]\n";
-  exit 1;
+my $repodir = '.';
+
+my @to;
+push @to, (getpwuid($<))[0];
+my $from = $to[0];
+
+my $domail = 0;
+my $dohelp = 0;
+my $dryrun = 0;
+
+GetOptions ('m|mail' => \$domail,
+	    'n|dryrun' => \$dryrun,
+	    'd|repodir=s' => \$repodir,
+	    't|to=s' => \@to,
+	    'f|from=s' => \$from,
+	    'h|help' => \$dohelp);
+
+
+if ($dohelp) {
+  print "options:\n";
+  print "-d, -repodir [path] : specify path to directory holding the git repo, (default: current directory)\n";
+  print "-f, -from [mailaddr]: email address of sender of email, (default: first address from '-to' option)\n";
+  print "-h, -help           : show this help text\n";
+  print "-m, -mail           : send mail (default: do not send)\n";
+  print "-n, -dryrun         : do nothing but print which options would be used, (default: don't run dry)\n";
+  print "-t, -to [mailaddr]  : email address of recipient of email, (default: user running this script)\n";
+  print "\tOptions may be specified in any order.\n";
+  print "\tYou can specify multiple recipients as a comma seperated list.\n";
+  print "\tIntentionally, email is not sent when there's nothing new.\n";
+  exit -1 unless $dryrun;
 }
 
-chdir($ARGV[0]);
 
-my $repo_local=`git log -1 --date=relative --format=%at`;
-my $repo_remote=`git log -1 --date=relative --format=%at origin`;
+if (@to > 1) {
+  shift @to;
+  @to = split(/,/, join(',', @to));
+  $from = $to[0];
+}
 
-chomp $repo_local;
-chomp $repo_remote;
+
+if ($dryrun) {
+  print "\n" if $dohelp;
+  print "DRYRUN\nrepodir: $repodir\nfrom: $from\nhelp: " . ($dohelp ? 'yes' : 'no');
+  print "\nmail: " . ($domail ? 'yes' : 'no') . "\ndryrun: " . ($dryrun ? 'yes' : 'no') . "\n";
+  foreach (@to) {
+    print "to: $_\n";
+  }
+  exit -2;
+}
+
+
+chdir($repodir);
+chomp(my $repo_local = `git log -1 --date=relative --format=%at`);
+chomp(my $repo_remote = `git log -1 --date=relative --format=%at origin`);
 
 if ($repo_local < $repo_remote) {
-  my $email = MIME::Lite->new(
-			      From     => $ARGV[2],
-			      To       => $ARGV[1],
-			      Subject  => 'get-newer: a commit has been made recently',
-			      Data     => "New commits for $ARGV[0]\n\tremote: ". localtime($repo_remote) . ", local: " . localtime($repo_local) . "\n"
-			     );
-  $email->send;
+  my $msg = "New commits for $repodir\n\tremote: " . localtime($repo_remote) . ", local: " . localtime($repo_local) . "\n";
+  if ($domail) {
+    foreach (@to) {
+      my $email = MIME::Lite->new(
+				  From     => $from,
+				  To       => $_,
+				  Subject  => 'git-newer: a commit has been made recently',
+				  Data     => $msg
+				 );
+      $email->send;
+    }
+  } else {
+    print $msg;
+  }
+} else {
+  print "$repodir: nothing new\n" unless $domail;
 }
 
 exit 0;
