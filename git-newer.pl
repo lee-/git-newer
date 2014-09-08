@@ -116,10 +116,12 @@ if ($status =~ m/Your branch and.*have diverged/) {
   } else {
     print $status;
   }
+
+  system('git', 'fetch', '-q') if($update);
+
 } else {
   print "$repodir: nothing new\n" unless $domail;
 }
 
-system('git', 'fetch', '-q') if($update);
 
 exit 0;
