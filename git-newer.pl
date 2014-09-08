@@ -40,13 +40,18 @@ my $from = $to[0];
 my $domail = 0;
 my $dohelp = 0;
 my $dryrun = 0;
+my $long = 0;
+my $update = 0;
 
-GetOptions ('m|mail' => \$domail,
-	    'n|dryrun' => \$dryrun,
+
+GetOptions ('m|mail+' => \$domail,
+	    'n|dryrun+' => \$dryrun,
 	    'd|repodir=s' => \$repodir,
 	    't|to=s' => \@to,
 	    'f|from=s' => \$from,
-	    'h|help' => \$dohelp);
+	    'h|help' => \$dohelp,
+	    'l|long+' => \$long,
+	    'u|update+' => \$update);
 
 
 if ($dohelp) {
@@ -56,7 +61,9 @@ if ($dohelp) {
   print "-h, -help           : show this help text\n";
   print "-m, -mail           : send mail (default: do not send)\n";
   print "-n, -dryrun         : do nothing but print which options would be used, (default: don't run dry)\n";
+  print "-l, -long           : do not truncate the output (default: do truncate)\n";
   print "-t, -to [mailaddr]  : email address of recipient of email, (default: user running this script)\n";
+  print "-u, -update         : quietly run 'git fetch' (default: do not run 'git fetch')\n";
   print "\tOptions may be specified in any order.\n";
   print "\tYou can specify multiple recipients as a comma seperated list.\n";
   print "\tIntentionally, email is not sent when there's nothing new.\n";
@@ -83,26 +90,36 @@ if ($dryrun) {
 
 
 chdir($repodir);
-chomp(my $repo_local = `git log -1 --date=relative --format=%at`);
-chomp(my $repo_remote = `git log -1 --date=relative --format=%at origin`);
+my $status = `git status`;
 
-if ($repo_local < $repo_remote) {
-  my $msg = "New commits for $repodir\n\tremote: " . localtime($repo_remote) . ", local: " . localtime($repo_local) . "\n";
+
+if ($status =~ m/Your branch and.*have diverged/) {
+  unless ($long) {
+    my $trunc = index($status, 'Untracked files:');
+    unless($trunc == -1) {
+      $status = substr($status, 0, $trunc) . "\n[...]\n";
+      $status =~ tr/\n//s;
+    }
+  }
+  $status .= "\n'git-fetch -q' will be run\n" if($update);
+
   if ($domail) {
     foreach (@to) {
       my $email = MIME::Lite->new(
 				  From     => $from,
 				  To       => $_,
-				  Subject  => 'git-newer: a commit has been made recently',
-				  Data     => $msg
+				  Subject  => 'git-newer: commits are available',
+				  Data     => $status
 				 );
       $email->send;
     }
   } else {
-    print $msg;
+    print $status;
   }
 } else {
   print "$repodir: nothing new\n" unless $domail;
 }
+
+system('git', 'fetch', '-q') if($update);
 
 exit 0;
